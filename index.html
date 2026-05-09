@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DSCR — Rental property analyzer</title>
+  <meta name="description" content="Debt Service Coverage Ratio calculator for residential rental property analysis." />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Geist:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    body { font-family: 'Geist', system-ui, sans-serif; background: #0c0a09; color: #e7e5e4; }
+    .display-font { font-family: 'Fraunces', Georgia, serif; font-optical-sizing: auto; }
+    .mono-font { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+    .loading-pulse { animation: pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+  </style>
+</head>
+<body>
+  <noscript>
+    <div style="padding:2rem;text-align:center;">
+      This calculator needs JavaScript enabled.
+    </div>
+  </noscript>
+
+  <div id="root">
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;">
+      <div class="loading-pulse mono-font" style="color:#a8a29e;font-size:0.875rem;letter-spacing:0.2em;text-transform:uppercase;">
+        Loading
+      </div>
+    </div>
+  </div>
+
+  <div id="error-display" style="display:none;padding:2rem;font-family:monospace;color:#fda4af;background:#0c0a09;min-height:100vh;">
+    <h2 style="font-size:1.25rem;margin-bottom:1rem;">Failed to load</h2>
+    <pre id="error-message" style="white-space:pre-wrap;font-size:0.875rem;"></pre>
+  </div>
+
+  <script>
+    window.addEventListener('error', function(e) {
+      var root = document.getElementById('root');
+      var disp = document.getElementById('error-display');
+      var msg = document.getElementById('error-message');
+      if (root && disp && msg) {
+        root.style.display = 'none';
+        disp.style.display = 'block';
+        msg.textContent = e.message + '\n\n' + (e.error && e.error.stack || '');
+      }
+    });
+  </script>
+
+  <script type="text/babel" data-presets="env,react">
+    const { useState, useMemo, useEffect } = React;
+
+    const Icon = ({ children, className = "w-5 h-5" }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+        className={className}>{children}</svg>
+    );
+    const TrendingDown = (p) => <Icon {...p}><polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/></Icon>;
+    const AlertCircle = (p) => <Icon {...p}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></Icon>;
+    const CheckCircle2 = (p) => <Icon {...p}><circle cx="12" cy="12" r="10"/><polyline points="9 12 12 15 16 9"/></Icon>;
+    const SaveIcon = (p) => <Icon {...p}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></Icon>;
+    const FolderOpen = (p) => <Icon {...p}><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"/></Icon>;
+    const Trash2 = (p) => <Icon {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></Icon>;
+
+    const STORAGE_PREFIX = "dscr:";
+
+    function App() {
+      const [inputs, setInputs] = useState({
+        propertyName: "",
+        purchasePrice: 250000,
+        downPaymentPct: 20,
+        interestRate: 7.5,
+        loanTermYears: 30,
+        monthlyRent: 2400,
+        annualPropertyTax: 6500,
+        annualHomeownersIns: 2200,
+        annualFloodIns: 1800,
+        annualMaintenance: 2500,
+        monthlyHOA: 0,
+        vacancyRate: 0,
+        useVacancy: false,
+      });
+
+      const [savedScenarios, setSavedScenarios] = useState([]);
+      const [showSaved, setShowSaved] = useState(false);
+      const [saveStatus, setSaveStatus] = useState("");
+
+      useEffect(() => { loadAll(); }, []);
+
+      function loadAll() {
+        try {
+          const items = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.indexOf(STORAGE_PREFIX) === 0) {
+              try {
+                const data = JSON.parse(localStorage.getItem(key));
+                items.push({ key, data });
+              } catch (e) {}
+            }
+          }
+          items.sort((a, b) => (b.data.savedAt || "").localeCompare(a.data.savedAt || ""));
+          setSavedScenarios(items);
+        } catch (e) {}
+      }
+
+      function saveScenario() {
+        if (!inputs.propertyName.trim()) {
+          setSaveStatus("Name first");
+          setTimeout(() => setSaveStatus(""), 2000);
+          return;
+        }
+        try {
+          const key = STORAGE_PREFIX + Date.now();
+          localStorage.setItem(key, JSON.stringify({ ...inputs, savedAt: new Date().toISOString() }));
+          setSaveStatus("Saved");
+          setTimeout(() => setSaveStatus(""), 2000);
+          loadAll();
+        } catch (e) {
+          setSaveStatus("Save failed");
+          setTimeout(() => setSaveStatus(""), 2000);
+        }
+      }
+
+      function loadScenario(s) {
+        setInputs(s.data);
+        setShowSaved(false);
+      }
+
+      function deleteScenario(key, e) {
+        e.stopPropagation();
+        try { localStorage.removeItem(key); loadAll(); } catch (err) {}
+      }
+
+      function update(field, value) {
+        setInputs((prev) => ({ ...prev, [field]: value }));
+      }
+
+      const calc = useMemo(() => {
+        const price = Number(inputs.purchasePrice) || 0;
+        const dpPct = Number(inputs.downPaymentPct) || 0;
+        const rate = Number(inputs.interestRate) || 0;
+        const term = Number(inputs.loanTermYears) || 30;
+        const rent = Number(inputs.monthlyRent) || 0;
+        const tax = Number(inputs.annualPropertyTax) || 0;
+        const homeIns = Number(inputs.annualHomeownersIns) || 0;
+        const floodIns = Number(inputs.annualFloodIns) || 0;
+        const maint = Number(inputs.annualMaintenance) || 0;
+        const hoa = (Number(inputs.monthlyHOA) || 0) * 12;
+        const vacPct = inputs.useVacancy ? Number(inputs.vacancyRate) || 0 : 0;
+
+        const downPayment = price * (dpPct / 100);
+        const loanAmount = price - downPayment;
+        const monthlyRate = rate / 100 / 12;
+        const numPayments = term * 12;
+        let monthlyPI = 0;
+        if (numPayments > 0 && loanAmount > 0) {
+          monthlyPI = monthlyRate === 0
+            ? loanAmount / numPayments
+            : (loanAmount * (monthlyRate * Math.pow(1 + monthlyRate, numPayments))) /
+              (Math.pow(1 + monthlyRate, numPayments) - 1);
+        }
+        const annualDebtService = monthlyPI * 12;
+
+        const grossAnnualRent = rent * 12;
+        const vacancyLoss = grossAnnualRent * (vacPct / 100);
+        const effectiveGrossIncome = grossAnnualRent - vacancyLoss;
+        const totalOpEx = tax + homeIns + floodIns + maint + hoa;
+        const noi = effectiveGrossIncome - totalOpEx;
+
+        const dscr = annualDebtService > 0 ? noi / annualDebtService : 0;
+        const monthlyCashFlow = (noi - annualDebtService) / 12;
+        const annualCashFlow = noi - annualDebtService;
+        const closingCosts = price * 0.03;
+        const totalCashIn = downPayment + closingCosts;
+        const cashOnCash = totalCashIn > 0 ? (annualCashFlow / totalCashIn) * 100 : 0;
+        const capRate = price > 0 ? (noi / price) * 100 : 0;
+
+        let verdict = "fail";
+        let verdictText = "";
+        if (dscr >= 1.25) { verdict = "strong"; verdictText = "Qualifies for most DSCR lenders"; }
+        else if (dscr >= 1.2) { verdict = "marginal"; verdictText = "Qualifies with some lenders, expect higher rate"; }
+        else if (dscr >= 1.0) { verdict = "weak"; verdictText = "Property covers debt but unlikely to qualify"; }
+        else { verdict = "fail"; verdictText = "Negative cash flow — does not service debt"; }
+
+        return { downPayment, loanAmount, monthlyPI, annualDebtService, grossAnnualRent,
+          vacancyLoss, effectiveGrossIncome, totalOpEx, noi, dscr, monthlyCashFlow,
+          annualCashFlow, cashOnCash, capRate, verdict, verdictText };
+      }, [inputs]);
+
+      function fmtCurrency(n) {
+        return new Intl.NumberFormat("en-US", {
+          style: "currency", currency: "USD",
+          minimumFractionDigits: 0, maximumFractionDigits: 0,
+        }).format(n || 0);
+      }
+
+      const verdictColor = {
+        strong: "text-emerald-300 bg-emerald-950/40 border-emerald-800/50",
+        marginal: "text-amber-300 bg-amber-950/40 border-amber-800/50",
+        weak: "text-orange-300 bg-orange-950/40 border-orange-800/50",
+        fail: "text-rose-300 bg-rose-950/40 border-rose-800/50",
+      };
+
+      function VerdictIcon() {
+        if (calc.verdict === "strong") return <CheckCircle2 />;
+        if (calc.verdict === "fail") return <TrendingDown />;
+        return <AlertCircle />;
+      }
+
+      return (
+        <div className="min-h-screen bg-stone-950 text-stone-100 px-4 py-6 sm:px-8 sm:py-10">
+          <div className="max-w-3xl mx-auto">
+            <header className="mb-8 pb-6 border-b border-stone-800">
+              <span className="text-xs tracking-[0.3em] text-amber-500/80 uppercase mono-font">Rental Analysis</span>
+              <h1 className="display-font text-4xl sm:text-5xl font-medium tracking-tight text-stone-50 leading-none mt-1">
+                DSCR<span className="text-amber-500">.</span>
+              </h1>
+              <p className="text-stone-400 mt-3 text-sm sm:text-base leading-relaxed">
+                Debt service coverage analysis for residential rental acquisitions.
+              </p>
+            </header>
+
+            <section className="mb-6">
+              <div className="flex flex-col sm:flex-row gap-3">
+                <input
+                  type="text"
+                  placeholder="Property name or address"
+                  value={inputs.propertyName}
+                  onChange={(e) => update("propertyName", e.target.value)}
+                  className="flex-1 bg-stone-900/60 border border-stone-800 rounded-md px-4 py-3 text-stone-100 placeholder-stone-600 focus:outline-none focus:border-amber-600/50 focus:bg-stone-900 transition"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={saveScenario}
+                    className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-stone-900 hover:bg-stone-800 border border-stone-800 rounded-md px-4 py-3 text-sm transition"
+                  >
+                    <SaveIcon className="w-4 h-4" />
+                    <span>{saveStatus || "Save"}</span>
+                  </button>
+                  <button
+                    onClick={() => setShowSaved(!showSaved)}
+                    className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-stone-900 hover:bg-stone-800 border border-stone-800 rounded-md px-4 py-3 text-sm transition"
+                  >
+                    <FolderOpen className="w-4 h-4" />
+                    <span>{savedScenarios.length}</span>
+                  </button>
+                </div>
+              </div>
+
+              {showSaved && (
+                <div className="mt-3 bg-stone-900/40 border border-stone-800 rounded-md p-2">
+                  {savedScenarios.length === 0 ? (
+                    <p className="text-stone-500 text-sm p-3 text-center">No saved properties yet</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {savedScenarios.map((s) => (
+                        <div
+                          key={s.key}
+                          onClick={() => loadScenario(s)}
+                          className="flex items-center justify-between p-2 hover:bg-stone-800/60 rounded cursor-pointer"
+                        >
+                          <span className="text-sm text-stone-200">{s.data.propertyName || "Unnamed property"}</span>
+                          <button
+                            onClick={(e) => deleteScenario(s.key, e)}
+                            className="text-stone-500 hover:text-rose-400 transition"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+
+            <section className={"mb-8 rounded-lg border p-6 " + verdictColor[calc.verdict]}>
+              <div className="flex items-start gap-4">
+                <div className="mt-1 flex-shrink-0"><VerdictIcon /></div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-3 mb-2 flex-wrap">
+                    <span className="text-xs tracking-widest uppercase opacity-70 mono-font">DSCR</span>
+                    <span className="display-font text-5xl sm:text-6xl font-medium tracking-tight mono-font">
+                      {calc.dscr.toFixed(2)}
+                    </span>
+                  </div>
+                  <p className="text-sm sm:text-base leading-relaxed opacity-90">{calc.verdictText}</p>
+                </div>
+              </div>
+            </section>
+
+            <SectionBlock title="Loan terms" subtitle="01">
+              <Field label="Purchase price" prefix="$">
+                <NumberInput value={inputs.purchasePrice} onChange={(v) => update("purchasePrice", v)} />
+              </Field>
+              <Field label="Down payment" suffix="%" hint={fmtCurrency(calc.downPayment) + " • Loan: " + fmtCurrency(calc.loanAmount)}>
+                <NumberInput value={inputs.downPaymentPct} onChange={(v) => update("downPaymentPct", v)} step="0.5" />
+              </Field>
+              <Field label="Interest rate" suffix="%">
+                <NumberInput value={inputs.interestRate} onChange={(v) => update("interestRate", v)} step="0.125" />
+              </Field>
+              <Field label="Loan term" suffix="yrs">
+                <NumberInput value={inputs.loanTermYears} onChange={(v) => update("loanTermYears", v)} />
+              </Field>
+            </SectionBlock>
+
+            <SectionBlock title="Rental income" subtitle="02">
+              <Field label="Monthly rent" prefix="$" hint={"Annual: " + fmtCurrency(calc.grossAnnualRent)}>
+                <NumberInput value={inputs.monthlyRent} onChange={(v) => update("monthlyRent", v)} />
+              </Field>
+
+              <div className="flex items-center gap-3 py-2">
+                <button
+                  onClick={() => update("useVacancy", !inputs.useVacancy)}
+                  className={"relative w-10 h-6 rounded-full transition " + (inputs.useVacancy ? "bg-amber-600" : "bg-stone-700")}
+                >
+                  <span className={"absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-stone-50 transition-transform " + (inputs.useVacancy ? "translate-x-4" : "")} />
+                </button>
+                <span className="text-sm text-stone-300">Apply vacancy reserve</span>
+              </div>
+
+              {inputs.useVacancy && (
+                <Field label="Vacancy rate" suffix="%" hint={"Lost income: " + fmtCurrency(calc.vacancyLoss)}>
+                  <NumberInput value={inputs.vacancyRate} onChange={(v) => update("vacancyRate", v)} step="0.5" />
+                </Field>
+              )}
+            </SectionBlock>
+
+            <SectionBlock title="Operating expenses" subtitle="03" caption="Houston carrying costs">
+              <Field label="Property tax" suffix="/yr" prefix="$">
+                <NumberInput value={inputs.annualPropertyTax} onChange={(v) => update("annualPropertyTax", v)} />
+              </Field>
+              <Field label="Homeowners insurance" suffix="/yr" prefix="$">
+                <NumberInput value={inputs.annualHomeownersIns} onChange={(v) => update("annualHomeownersIns", v)} />
+              </Field>
+              <Field label="Flood insurance" suffix="/yr" prefix="$">
+                <NumberInput value={inputs.annualFloodIns} onChange={(v) => update("annualFloodIns", v)} />
+              </Field>
+              <Field label="Maintenance reserve" suffix="/yr" prefix="$">
+                <NumberInput value={inputs.annualMaintenance} onChange={(v) => update("annualMaintenance", v)} />
+              </Field>
+              <Field label="HOA" suffix="/mo" prefix="$">
+                <NumberInput value={inputs.monthlyHOA} onChange={(v) => update("monthlyHOA", v)} />
+              </Field>
+            </SectionBlock>
+
+            <section className="mt-10 mb-6">
+              <div className="flex items-baseline gap-3 mb-4">
+                <span className="text-xs mono-font text-stone-500">04</span>
+                <h2 className="display-font text-2xl text-stone-100">The numbers</h2>
+              </div>
+              <div className="bg-stone-900/40 border border-stone-800 rounded-lg overflow-hidden">
+                <Row label="Effective gross income" value={fmtCurrency(calc.effectiveGrossIncome)} />
+                <Row label="− Operating expenses" value={fmtCurrency(calc.totalOpEx)} muted={true} />
+                <Row label="Net operating income" value={fmtCurrency(calc.noi)} emphasis={true} />
+                <Row label="− Annual debt service" value={fmtCurrency(calc.annualDebtService)} muted={true} />
+                <Row label="Annual cash flow" value={fmtCurrency(calc.annualCashFlow)} emphasis={true}
+                  accent={calc.annualCashFlow >= 0 ? "positive" : "negative"} />
+              </div>
+            </section>
+
+            <section className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-10">
+              <Metric label="Monthly P&I" value={fmtCurrency(calc.monthlyPI)} />
+              <Metric label="Monthly cash" value={fmtCurrency(calc.monthlyCashFlow)}
+                accent={calc.monthlyCashFlow >= 0 ? "positive" : "negative"} />
+              <Metric label="Cap rate" value={calc.capRate.toFixed(2) + "%"} />
+              <Metric label="Cash-on-cash" value={calc.cashOnCash.toFixed(2) + "%"}
+                accent={calc.cashOnCash >= 8 ? "positive" : calc.cashOnCash >= 0 ? "neutral" : "negative"} />
+            </section>
+
+            <section className="bg-stone-900/30 border border-stone-800 rounded-lg p-5 mb-8">
+              <h3 className="text-xs tracking-[0.2em] uppercase text-stone-500 mb-3 mono-font">DSCR reference</h3>
+              <div className="space-y-2 text-sm">
+                <RefRow range="1.50+" label="Strong — best rates, easiest qualification" color="bg-emerald-500" />
+                <RefRow range="1.25 – 1.49" label="Standard — qualifies for most lenders" color="bg-emerald-500" />
+                <RefRow range="1.20 – 1.24" label="Marginal — fewer lenders, higher rate" color="bg-amber-500" />
+                <RefRow range="1.00 – 1.19" label="Weak — covers debt but won't qualify" color="bg-orange-500" />
+                <RefRow range="< 1.00" label="Failing — negative cash flow" color="bg-rose-500" />
+              </div>
+            </section>
+
+            <footer className="text-center text-xs text-stone-600 mono-font pb-8">
+              Estimates only. Not lending advice. Closing costs assumed at 3% for cash-on-cash calc.
+            </footer>
+          </div>
+        </div>
+      );
+    }
+
+    function SectionBlock({ title, subtitle, caption, children }) {
+      return (
+        <section className="mb-8">
+          <div className="flex items-baseline justify-between mb-4">
+            <div className="flex items-baseline gap-3">
+              <span className="text-xs mono-font text-stone-500">{subtitle}</span>
+              <h2 className="display-font text-2xl text-stone-100">{title}</h2>
+            </div>
+            {caption && <span className="text-xs text-stone-500">{caption}</span>}
+          </div>
+          <div className="space-y-4">{children}</div>
+        </section>
+      );
+    }
+
+    function Field({ label, prefix, suffix, hint, children }) {
+      return (
+        <div>
+          <label className="flex items-baseline justify-between mb-1.5">
+            <span className="text-sm text-stone-400">{label}</span>
+          </label>
+          <div className="relative flex items-center bg-stone-900/60 border border-stone-800 rounded-md focus-within:border-amber-600/50 focus-within:bg-stone-900 transition">
+            {prefix && <span className="pl-3 text-stone-500 mono-font text-sm">{prefix}</span>}
+            {children}
+            {suffix && <span className="pr-3 text-stone-500 mono-font text-sm">{suffix}</span>}
+          </div>
+          {hint && <p className="text-xs text-stone-500 mt-1.5 mono-font">{hint}</p>}
+        </div>
+      );
+    }
+
+    function NumberInput({ value, onChange, step }) {
+      return (
+        <input
+          type="number"
+          value={value}
+          step={step || "1"}
+          onChange={(e) => onChange(e.target.value === "" ? "" : Number(e.target.value))}
+          onFocus={(e) => e.target.select()}
+          className="w-full bg-transparent px-3 py-3 text-stone-100 mono-font focus:outline-none"
+        />
+      );
+    }
+
+    function Row({ label, value, muted, emphasis, accent }) {
+      let colorClass = "text-stone-200";
+      if (accent === "positive") colorClass = "text-emerald-400";
+      else if (accent === "negative") colorClass = "text-rose-400";
+      else if (emphasis) colorClass = "text-stone-50";
+      else if (muted) colorClass = "text-stone-400";
+
+      return (
+        <div className={"flex items-center justify-between px-5 py-3.5 border-b border-stone-800/60 last:border-0 " + (emphasis ? "bg-stone-900/60" : "")}>
+          <span className={"text-sm " + (muted ? "text-stone-500" : "text-stone-300")}>{label}</span>
+          <span className={"mono-font " + (emphasis ? "text-base font-medium" : "text-sm") + " " + colorClass}>{value}</span>
+        </div>
+      );
+    }
+
+    function Metric({ label, value, accent }) {
+      let colorClass = "text-stone-100";
+      if (accent === "positive") colorClass = "text-emerald-400";
+      else if (accent === "negative") colorClass = "text-rose-400";
+
+      return (
+        <div className="bg-stone-900/40 border border-stone-800 rounded-md p-3">
+          <div className="text-[10px] tracking-widest uppercase text-stone-500 mono-font mb-1.5">{label}</div>
+          <div className={"mono-font text-sm sm:text-base font-medium " + colorClass}>{value}</div>
+        </div>
+      );
+    }
+
+    function RefRow({ range, label, color }) {
+      return (
+        <div className="flex items-center gap-3">
+          <span className={"w-1.5 h-1.5 rounded-full flex-shrink-0 " + color}></span>
+          <span className="mono-font text-stone-300 w-24 flex-shrink-0">{range}</span>
+          <span className="text-stone-400">{label}</span>
+        </div>
+      );
+    }
+
+    try {
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<App />);
+    } catch (err) {
+      const r = document.getElementById('root');
+      const d = document.getElementById('error-display');
+      const m = document.getElementById('error-message');
+      if (r) r.style.display = 'none';
+      if (d) d.style.display = 'block';
+      if (m) m.textContent = err.message + '\n\n' + (err.stack || '');
+    }
+  </script>
+</body>
+</html>
