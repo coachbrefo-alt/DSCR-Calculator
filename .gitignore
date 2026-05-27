@@ -1,0 +1,14 @@
+# Next.js
+tenant-landlord-app/.next/
+tenant-landlord-app/node_modules/
+tenant-landlord-app/.env.local
+
+# Python
+scraper/__pycache__/
+scraper/*.pyc
+scraper/.env
+scraper/venv/
+
+# General
+.DS_Store
+*.log
